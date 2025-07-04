@@ -85,9 +85,6 @@ PRESS_DICT = {
     "snap_think": ComposedPress([SnapKVPress(), ThinKPress()]),
     "pyramidkv": PyramidKVPress(),
     "finch": FinchPress(),
-    "finch_with_fix": FinchPress(with_fix=True),
-    "expected_attention_rerotation": KeyRerotationPress(ExpectedAttentionPress()),
-    "expected_attention_rerotation_with_fix": KeyRerotationPress(press=ExpectedAttentionPress(), with_fix=True),
 }
 
 
@@ -103,7 +100,8 @@ def evaluate(
     max_context_length: Optional[int] = None,
     compress_questions: bool = False,
     key_channel_compression_ratio: float = 0.5,
-    apply_yarn: bool = False,
+    rope_scaling: Optional[dict] = None,
+    max_position_embeddings: Optional[int] = None,
 ):
     """
     Evaluate a model on a dataset using a press and save the results
@@ -132,6 +130,13 @@ def evaluate(
         Whether to compress the questions as well, by default False
     key_channel_compression_ratio : float, optional
         key Channel Compression ratio for the channel press, by default 0.5
+    rope_scaling : dict, optional
+        RoPE-scaling configuration dictionary passed to
+        model config's `rope_scaling field. (e.g. {"type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768});
+        by default None.  If set, you **must** also provide ``max_position_embeddings``.
+    max_position_embeddings : int, optional
+        The value to set for ``max_position_embeddings`` in the model config when ``rope_scaling`` is used.  
+        Required if ``rope_scaling`` is not ``None``; ignored otherwise.
     """
 
     assert dataset in DATASET_DICT, f"No dataset found for {dataset}"
@@ -196,17 +201,16 @@ def evaluate(
         except ImportError:
             pass
         
-    if apply_yarn:
-        # Append additional keyword arguments for Qwen
-        logger.info("Applying yarn technique")
-        model_kwargs.update({
-            "max_position_embeddings": 131072,
-            "rope_scaling": {
-                "factor": 4.0,
-                "original_max_position_embeddings": 32768,
-                "type": "yarn"
+    if rope_scaling is not None:
+        if max_position_embeddings is None:
+            raise ValueError("max_position_embeddings must be given when rope_scaling is used")
+
+        model_kwargs.update(
+            {
+                "max_position_embeddings": max_position_embeddings,
+                "rope_scaling": rope_scaling,
             }
-        })
+        )
 
     if device == "auto":
         pipe = pipeline("kv-press-text-generation", model=model, device_map="auto", model_kwargs=model_kwargs)
