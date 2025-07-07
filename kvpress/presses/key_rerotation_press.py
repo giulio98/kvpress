@@ -31,7 +31,7 @@ class KeyRerotationPress(BasePress):
         assert isinstance(self.press, ScorerPress)
 
     @staticmethod
-    def _rerotate_cos_sin(x, inv_freq,  selected_positions):
+    def _rerotate_cos_sin(x, inv_freq, selected_positions):
         """
         Compute cosine and sine rotary positional embeddings required to
         re-rotate pruned keys back into the canonical RoPE space.
@@ -39,45 +39,39 @@ class KeyRerotationPress(BasePress):
         Parameters
         ----------
         x : torch.Tensor
-            Key tensor that provides dtype and device information. Shape
-            ``(B, H, L, D)``, where *B* is the batch size, *H* is the number
-            of attention heads, *L* is the sequence length, and *D* equals
-            ``module.head_dim``.
+            Any key-like tensor that provides ``dtype`` and ``device``.
+            Shape ``(bsz, num_key_value_heads, q_len, d)``.
         inv_freq : torch.Tensor
-            Inverse-frequency tensor from the layer's ``RotaryEmbedding``
-            (``module.rotary_emb.inv_freq``). Shape ``(M,)`` where
-            ``M = D // 2``.
-         selected_positions : torch.Tensor
-            Tensor of kept token indices produced by the pruning step.
-            Shape ``(B, H, L)``.
+            ``module.rotary_emb.inv_freq``. Shape ``(d//2,)``.
+        selected_positions : torch.Tensor
+            Indices of the *kept* tokens.
+            Shape ``(bsz, num_key_value_heads, n_kept)``.
 
         Returns
         -------
-        Tuple[torch.Tensor, torch.Tensor]
-            ``cos``, ``sin`` — The cosine and sine embedding tensors, each of
-            shape ``(B, H, L, D)`` and matching the ``dtype`` and ``device`` of
-            *x*. These tensors are broadcast-multiplied with the gathered keys
-            to restore their rotary orientation.
+        cos, sin : torch.Tensor
+            Cosine and sine embeddings, each of shape
+            ``(bsz, num_key_value_heads, n_kept, d)``, matching ``dtype``/``device`` of ``x``.
         """
-        B, H, L = selected_positions.shape
+        bsz, num_key_value_heads, n_kept = selected_positions.shape
         device = selected_positions.device
         device_type = x.device.type
         dtype = x.dtype
         # Original positional indices
-        idx = torch.arange(0, L, device=device)
-        idx = idx.unsqueeze(0)
-        inv_freq = inv_freq[None, None, :, None].float().expand(B, H, -1, 1)  # (B, H, M, 1)
-        idx = idx[:, None, :].float().expand(B, H, L)  # (B, H, L)
+        idx = torch.arange(0, n_kept, device=device)  # (n_kept,)
+        idx = idx.unsqueeze(0)  # (1, n_kept)
+        inv_freq = inv_freq[None, None, :, None].float().expand(bsz, num_key_value_heads, -1, 1)
+        idx = idx[:, None, :].float().expand(bsz, num_key_value_heads, n_kept)
         # Compute delta between original and selected positions
-        delta_pos = idx - selected_positions
-        delta_pos = delta_pos.unsqueeze(2)  # (B, H, 1, L)
+        delta_pos = idx - selected_positions  # (bsz, num_key_value_heads, n_kept)
+        delta_pos = delta_pos.unsqueeze(2)  # (bsz, num_key_value_heads, 1, n_kept)
 
         device_type = device_type if isinstance(device_type, str) and device_type != "mps" else "cpu"
 
         with torch.autocast(device_type=device_type, enabled=False):
             # Compute the new freq by scaling inv_freq by delta
-            freqs = delta_pos.float() * inv_freq.float()
-            freqs = freqs.transpose(2, 3)
+            freqs = delta_pos.float() * inv_freq.float()  # (bsz, num_key_value_heads, d//2, n_kept)
+            freqs = freqs.transpose(2, 3)  # (bsz, num_key_value_heads, n_kept, d//2)
             emb = torch.cat((freqs, freqs), dim=-1)
             # Compute cosine and sine required to re-rotate keys to selected positions
             cos = emb.cos().contiguous()
@@ -105,7 +99,8 @@ class KeyRerotationPress(BasePress):
         Returns
         -------
         torch.Tensor
-            The rerotated keys tensor.
+            The rerotated keys tensor of shape
+            ``(bsz, num_heads, n_kept, d)``.
         """
         new_cos, new_sin = KeyRerotationPress._rerotate_cos_sin(keys, module.rotary_emb.inv_freq, indices)
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
