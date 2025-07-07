@@ -23,12 +23,12 @@ from kvpress import KeyRerotationPress, ScorerPress
 from tests.fixtures import unit_test_model  # noqa: F401
 
 
-@pytest.mark.parametrize("rope_variant", ["default", "yarn"])  # NEW
+@pytest.mark.parametrize("rope_variant", ["default", "yarn"])
 @pytest.mark.parametrize("precision", ["full", "half"])
-def test_rerotate_keys_is_matches_reference_implementation(  # noqa: F811
-    unit_test_model: LlamaForCausalLM,
-    rope_variant: str,
-    precision: str,
+def test_rerotate_keys_is_matches_reference_implementation(
+    unit_test_model: LlamaForCausalLM,  # noqa: F811
+    rope_variant,
+    precision,
 ):
     """
     Compare KeyRerotationPress' rerotation of keys with the reference
@@ -57,13 +57,13 @@ def test_rerotate_keys_is_matches_reference_implementation(  # noqa: F811
             unit_test_model.model.rotary_emb = LlamaRotaryEmbedding(cfg, device=unit_test_model.device)
         except KeyError:
             pytest.skip("YaRN rotary-embedding not available in this transformers version.")
-    
+
     for layer in unit_test_model.model.layers:
         if isinstance(unit_test_model, Gemma3ForCausalLM) and layer.is_sliding:
             # Skip layers with sliding window attention, only for Gemma3
             continue
         layer.self_attn.rotary_emb = unit_test_model.model.rotary_emb
-    
+
     if precision == "half" and torch.cuda.is_available():
         unit_test_model = unit_test_model.cuda().half()
     elif precision == "half":
@@ -79,7 +79,7 @@ def test_rerotate_keys_is_matches_reference_implementation(  # noqa: F811
         )
 
         keys = get_keys_with_rope(module, hidden_states)
-        
+
         values = torch.randn_like(keys)
         # Press result
         keys_compressed, _ = key_rerotation_press.compress(
@@ -90,7 +90,7 @@ def test_rerotate_keys_is_matches_reference_implementation(  # noqa: F811
             attentions=None,
             kwargs={},
         )
-        
+
         indices = original_press.indices
         keys_compressed_ref = compute_rerotated_keys_comparison_implementation(module, hidden_states, indices)
 
