@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 
 import torch
 from torch.nn import functional as F
-from transformers.models.llama.modeling_llama import rotate_half
 
 from kvpress.presses.base_press import BasePress
 from kvpress.presses.snapkv_press import SnapKVPress
@@ -38,7 +37,7 @@ class FinchPress(BasePress):
     delimiter_token: str = field(default=None, init=False)  # To be set by the update_model_and_tokenizer method
     delimiter_token_id: int = field(default=None, init=False)  # To be set by the update_model_and_tokenizer method
     window_size: int = field(default=None, init=False)
-    
+
     def score(self, module, hidden_states, keys, values, attentions, kwargs):
         """
         Similar to SnapKVPress except it adds a normalization step before averaging on the context window.
@@ -94,7 +93,6 @@ class FinchPress(BasePress):
                 chunk_indices = i + chunk_scores.topk(n_kept, dim=-1).indices
                 indices.append(chunk_indices)
             indices = torch.cat(indices, dim=-1)
-        
         if self.rerotate_keys:
             indices = torch.sort(indices, dim=2).values
             keys = KeyRerotationPress.rerotate_keys(module, indices, keys)
@@ -102,7 +100,7 @@ class FinchPress(BasePress):
         else:
             indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
             keys = keys.gather(2, indices).contiguous()
-        
+
         values = values.gather(2, indices).contiguous()
 
         return keys, values
