@@ -31,7 +31,7 @@ class KeyRerotationPress(BasePress):
         assert isinstance(self.press, ScorerPress)
 
     @staticmethod
-    def _rerotate_cos_sin(x, inv_freq, selected_positions):
+    def _rerotate_cos_sin(x, inv_freq, attention_scaling, selected_positions):
         """
         Compute cosine and sine rotary positional embeddings required to
         re-rotate pruned keys back into the canonical RoPE space.
@@ -74,8 +74,8 @@ class KeyRerotationPress(BasePress):
             freqs = freqs.transpose(2, 3)  # (bsz, num_key_value_heads, n_kept, d//2)
             emb = torch.cat((freqs, freqs), dim=-1)
             # Compute cosine and sine required to re-rotate keys to selected positions
-            cos = emb.cos().contiguous()
-            sin = emb.sin().contiguous()
+            cos = emb.cos().contiguous() * attention_scaling
+            sin = emb.sin().contiguous() * attention_scaling
         return cos.to(dtype=dtype), sin.to(dtype=dtype)
 
     @staticmethod
@@ -102,7 +102,10 @@ class KeyRerotationPress(BasePress):
             The rerotated keys tensor of shape
             ``(bsz, num_heads, n_kept, d)``.
         """
-        new_cos, new_sin = KeyRerotationPress._rerotate_cos_sin(keys, module.rotary_emb.inv_freq, indices)
+        new_cos, new_sin = KeyRerotationPress._rerotate_cos_sin(keys,
+                                                                module.rotary_emb.inv_freq,
+                                                                module.rotary_emb.attention_scaling,
+                                                                indices)
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
         keys = keys.gather(2, indices).contiguous()
         return (keys * new_cos) + (rotate_half(keys) * new_sin)
